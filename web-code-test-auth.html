@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Code Auth</title>
+    <style>
+        body {
+            background-color: white;
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        button {
+            margin-top: 10px;
+            padding: 8px 16px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        #user-info, #code-section {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 20px;
+            display: none;
+        }
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Web Code Auth</h1>
+
+    <div id="auth-section">
+        <button id="google-signin-btn">Sign in with Google</button>
+    </div>
+
+    <div id="user-info">
+        <p><strong>Display Name:</strong> <span id="display-name"></span></p>
+        <p><strong>Email:</strong> <span id="email"></span></p>
+    </div>
+
+    <div id="code-section">
+        <p><strong>Current Code:</strong> <span id="current-code">None</span></p>
+        <button id="generate-code-btn">Generate new code</button>
+        <button id="unlink-code-btn" style="display:none;">Unlink code</button>
+        <div id="message" class="error"></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, onSnapshot, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAZBKAckVa4IMvJGjcyndZx6Y1XD52lgro",
+            authDomain: "project-zirconium.firebaseapp.com",
+            projectId: "project-zirconium",
+            storageBucket: "project-zirconium.firebasestorage.app",
+            messagingSenderId: "1096564243475",
+            appId: "1:1096564243475:web:6d0956a70125eeea1ad3e6",
+            measurementId: "G-1D4F692C1Q"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const googleBtn = document.getElementById('google-signin-btn');
+        const authSection = document.getElementById('auth-section');
+        const userInfo = document.getElementById('user-info');
+        const codeSection = document.getElementById('code-section');
+        const displayNameSpan = document.getElementById('display-name');
+        const emailSpan = document.getElementById('email');
+        const currentCodeSpan = document.getElementById('current-code');
+        const generateBtn = document.getElementById('generate-code-btn');
+        const unlinkBtn = document.getElementById('unlink-code-btn');
+        const messageDiv = document.getElementById('message');
+
+        let currentUser = null;
+        let userData = null;
+
+        googleBtn.addEventListener('click', () => {
+            const provider = new GoogleAuthProvider();
+            signInWithPopup(auth, provider).catch(error => {
+                console.error("Error signing in", error);
+                messageDiv.textContent = error.message;
+            });
+        });
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                authSection.style.display = 'none';
+                userInfo.style.display = 'block';
+                codeSection.style.display = 'block';
+                displayNameSpan.textContent = user.displayName;
+                emailSpan.textContent = user.email;
+
+                // Sync user data
+                const userRef = doc(db, "users", user.uid);
+                
+                // Set initial data if not exists, or update basic info
+                setDoc(userRef, {
+                    displayName: user.displayName,
+                    email: user.email
+                }, { merge: true });
+
+                onSnapshot(userRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        userData = docSnap.data();
+                        const code = userData.code;
+                        currentCodeSpan.textContent = code || 'None';
+                        if (code) {
+                            unlinkBtn.style.display = 'inline-block';
+                        } else {
+                            unlinkBtn.style.display = 'none';
+                        }
+                    }
+                });
+
+            } else {
+                authSection.style.display = 'block';
+                userInfo.style.display = 'none';
+                codeSection.style.display = 'none';
+                userData = null;
+            }
+        });
+
+        function generateCode() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let result = '';
+            for (let i = 0; i < 6; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
+
+        generateBtn.addEventListener('click', async () => {
+            if (!currentUser) return;
+            messageDiv.textContent = '';
+
+            const now = new Date();
+            if (userData && userData.lastGeneratedAt) {
+                const lastGen = userData.lastGeneratedAt.toDate();
+                const diff = (now - lastGen) / 1000 / 60; // minutes
+                if (diff < 5) {
+                    const waitTime = Math.ceil(5 - diff);
+                    messageDiv.textContent = `Please wait ${waitTime} minute(s) before generating a new code.`;
+                    return;
+                }
+            }
+
+            const newCode = generateCode();
+            try {
+                await updateDoc(doc(db, "users", currentUser.uid), {
+                    code: newCode,
+                    lastGeneratedAt: serverTimestamp()
+                });
+            } catch (e) {
+                console.error("Error updating code", e);
+                messageDiv.textContent = "Error updating code.";
+            }
+        });
+
+        unlinkBtn.addEventListener('click', async () => {
+            if (!currentUser) return;
+            try {
+                await updateDoc(doc(db, "users", currentUser.uid), {
+                    code: null // Removing the code
+                });
+            } catch (e) {
+                console.error("Error unlinking", e);
+                messageDiv.textContent = "Error unlinking code.";
+            }
+        });
+
+    </script>
+</body>
+</html>

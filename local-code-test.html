@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Code Test</title>
+    <style>
+        body {
+            background-color: white;
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        button {
+            margin-top: 10px;
+            padding: 8px 16px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        input {
+            padding: 8px;
+            font-size: 14px;
+        }
+        #success-page {
+            display: none;
+            padding: 20px;
+            border: 1px solid #ccc;
+            background-color: white; /* Will be overridden */
+        }
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Local Code Test</h1>
+
+    <div id="login-section">
+        <p>Enter your code:</p>
+        <input type="text" id="code-input" placeholder="Enter code">
+        <button id="submit-btn">Submit</button>
+        <div id="error-msg" class="error"></div>
+    </div>
+
+    <div id="success-page">
+        <h2>Connected!</h2>
+        <p><strong>User:</strong> <span id="user-display-name"></span></p>
+        <button id="unlink-btn">Unlink code</button>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, query, where, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAZBKAckVa4IMvJGjcyndZx6Y1XD52lgro",
+            authDomain: "project-zirconium.firebaseapp.com",
+            projectId: "project-zirconium",
+            storageBucket: "project-zirconium.firebasestorage.app",
+            messagingSenderId: "1096564243475",
+            appId: "1:1096564243475:web:6d0956a70125eeea1ad3e6",
+            measurementId: "G-1D4F692C1Q"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        const codeInput = document.getElementById('code-input');
+        const submitBtn = document.getElementById('submit-btn');
+        const errorMsg = document.getElementById('error-msg');
+        const loginSection = document.getElementById('login-section');
+        const successPage = document.getElementById('success-page');
+        const userDisplayName = document.getElementById('user-display-name');
+        const unlinkBtn = document.getElementById('unlink-btn');
+
+        let matchedUserDocId = null;
+
+        submitBtn.addEventListener('click', async () => {
+            const code = codeInput.value.trim();
+            if (!code) return;
+            
+            errorMsg.textContent = "Checking...";
+
+            try {
+                const q = query(collection(db, "users"), where("code", "==", code));
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    errorMsg.textContent = "Invalid code. Please try again.";
+                } else {
+                    // Assuming code is unique, we take the first match
+                    const userDoc = querySnapshot.docs[0];
+                    const userData = userDoc.data();
+                    
+                    matchedUserDocId = userDoc.id;
+                    
+                    loginSection.style.display = 'none';
+                    successPage.style.display = 'block';
+                    document.body.style.backgroundColor = '#e0f7fa'; // Cyan 50
+                    userDisplayName.textContent = userData.displayName || "Unknown User";
+                    errorMsg.textContent = "";
+                }
+            } catch (e) {
+                console.error("Error querying code", e);
+                errorMsg.textContent = "An error occurred. Check console.";
+            }
+        });
+
+        unlinkBtn.addEventListener('click', async () => {
+            if (!matchedUserDocId) return;
+
+            try {
+                await updateDoc(doc(db, "users", matchedUserDocId), {
+                    code: null
+                });
+                alert("Unlinked successfully. Returning to start.");
+                location.reload();
+            } catch (e) {
+                console.error("Error unlinking", e);
+                alert("Failed to unlink.");
+            }
+        });
+
+    </script>
+</body>
+</html>
