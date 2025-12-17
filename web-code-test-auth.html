@@ -26,6 +26,10 @@
             color: red;
             margin-top: 10px;
         }
+        .success {
+            color: green;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
@@ -39,19 +43,21 @@
     <div id="user-info">
         <p><strong>Display Name:</strong> <span id="display-name"></span></p>
         <p><strong>Email:</strong> <span id="email"></span></p>
+        <button id="logout-btn">Log out</button>
     </div>
 
     <div id="code-section">
         <p><strong>Current Code:</strong> <span id="current-code">None</span></p>
         <button id="generate-code-btn">Generate new code</button>
+        <button id="copy-code-btn" style="display:none;">Copy code</button>
         <button id="unlink-code-btn" style="display:none;">Unlink code</button>
         <div id="message" class="error"></div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, updateDoc, onSnapshot, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAZBKAckVa4IMvJGjcyndZx6Y1XD52lgro",
@@ -68,6 +74,7 @@
         const db = getFirestore(app);
 
         const googleBtn = document.getElementById('google-signin-btn');
+        const logoutBtn = document.getElementById('logout-btn');
         const authSection = document.getElementById('auth-section');
         const userInfo = document.getElementById('user-info');
         const codeSection = document.getElementById('code-section');
@@ -76,16 +83,27 @@
         const currentCodeSpan = document.getElementById('current-code');
         const generateBtn = document.getElementById('generate-code-btn');
         const unlinkBtn = document.getElementById('unlink-code-btn');
+        const copyBtn = document.getElementById('copy-code-btn');
         const messageDiv = document.getElementById('message');
 
         let currentUser = null;
         let userData = null;
+        let unsubscribeDoc = null;
 
         googleBtn.addEventListener('click', () => {
             const provider = new GoogleAuthProvider();
             signInWithPopup(auth, provider).catch(error => {
                 console.error("Error signing in", error);
+                messageDiv.className = 'error';
                 messageDiv.textContent = error.message;
+            });
+        });
+
+        logoutBtn.addEventListener('click', () => {
+            signOut(auth).then(() => {
+                messageDiv.textContent = '';
+            }).catch((error) => {
+                console.error("Error signing out", error);
             });
         });
 
@@ -98,7 +116,6 @@
                 displayNameSpan.textContent = user.displayName;
                 emailSpan.textContent = user.email;
 
-                // Sync user data
                 const userRef = doc(db, "users", user.uid);
                 
                 // Set initial data if not exists, or update basic info
@@ -107,15 +124,17 @@
                     email: user.email
                 }, { merge: true });
 
-                onSnapshot(userRef, (docSnap) => {
+                unsubscribeDoc = onSnapshot(userRef, (docSnap) => {
                     if (docSnap.exists()) {
                         userData = docSnap.data();
                         const code = userData.code;
                         currentCodeSpan.textContent = code || 'None';
                         if (code) {
                             unlinkBtn.style.display = 'inline-block';
+                            copyBtn.style.display = 'inline-block';
                         } else {
                             unlinkBtn.style.display = 'none';
+                            copyBtn.style.display = 'none';
                         }
                     }
                 });
@@ -125,32 +144,27 @@
                 userInfo.style.display = 'none';
                 codeSection.style.display = 'none';
                 userData = null;
+                if (unsubscribeDoc) {
+                    unsubscribeDoc();
+                    unsubscribeDoc = null;
+                }
             }
         });
 
         function generateCode() {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
             let result = '';
-            for (let i = 0; i < 6; i++) {
+            for (let i = 0; i < 10; i++) {
                 result += chars.charAt(Math.floor(Math.random() * chars.length));
             }
-            return result;
+            return '4SP-' + result;
         }
 
         generateBtn.addEventListener('click', async () => {
             if (!currentUser) return;
             messageDiv.textContent = '';
-
-            const now = new Date();
-            if (userData && userData.lastGeneratedAt) {
-                const lastGen = userData.lastGeneratedAt.toDate();
-                const diff = (now - lastGen) / 1000 / 60; // minutes
-                if (diff < 5) {
-                    const waitTime = Math.ceil(5 - diff);
-                    messageDiv.textContent = `Please wait ${waitTime} minute(s) before generating a new code.`;
-                    return;
-                }
-            }
+            
+            // Cooldown removed per request
 
             const newCode = generateCode();
             try {
@@ -158,8 +172,12 @@
                     code: newCode,
                     lastGeneratedAt: serverTimestamp()
                 });
+                messageDiv.className = 'success';
+                messageDiv.textContent = 'New code generated.';
+                setTimeout(() => { messageDiv.textContent = ''; }, 3000);
             } catch (e) {
                 console.error("Error updating code", e);
+                messageDiv.className = 'error';
                 messageDiv.textContent = "Error updating code.";
             }
         });
@@ -168,11 +186,28 @@
             if (!currentUser) return;
             try {
                 await updateDoc(doc(db, "users", currentUser.uid), {
-                    code: null // Removing the code
+                    code: null 
                 });
+                messageDiv.className = 'success';
+                messageDiv.textContent = 'Code unlinked.';
+                setTimeout(() => { messageDiv.textContent = ''; }, 3000);
             } catch (e) {
                 console.error("Error unlinking", e);
+                messageDiv.className = 'error';
                 messageDiv.textContent = "Error unlinking code.";
+            }
+        });
+
+        copyBtn.addEventListener('click', () => {
+            const code = currentCodeSpan.textContent;
+            if (code && code !== 'None') {
+                navigator.clipboard.writeText(code).then(() => {
+                    messageDiv.className = 'success';
+                    messageDiv.textContent = 'Code copied to clipboard!';
+                    setTimeout(() => { messageDiv.textContent = ''; }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                });
             }
         });
 

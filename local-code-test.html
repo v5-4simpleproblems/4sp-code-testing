@@ -38,7 +38,7 @@
 
     <div id="login-section">
         <p>Enter your code:</p>
-        <input type="text" id="code-input" placeholder="Enter code">
+        <input type="text" id="code-input" placeholder="4SP-XXXXXXXXXX" value="4SP-">
         <button id="submit-btn">Submit</button>
         <div id="error-msg" class="error"></div>
     </div>
@@ -51,7 +51,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, query, where, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, query, where, getDocs, updateDoc, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAZBKAckVa4IMvJGjcyndZx6Y1XD52lgro",
@@ -75,37 +75,80 @@
         const unlinkBtn = document.getElementById('unlink-btn');
 
         let matchedUserDocId = null;
+        let unsubscribeUserDoc = null;
+        let currentActiveCode = null;
+
+        function resetUI() {
+            if (unsubscribeUserDoc) {
+                unsubscribeUserDoc();
+                unsubscribeUserDoc = null;
+            }
+            matchedUserDocId = null;
+            currentActiveCode = null;
+            loginSection.style.display = 'block';
+            successPage.style.display = 'none';
+            document.body.style.backgroundColor = 'white';
+            codeInput.value = "4SP-";
+        }
 
         submitBtn.addEventListener('click', async () => {
             const code = codeInput.value.trim();
-            if (!code) return;
+            if (!code || code === '4SP-') {
+                errorMsg.textContent = "Please enter a valid code.";
+                return;
+            }
             
             errorMsg.textContent = "Checking...";
 
             try {
+                // Initial check to find the user
                 const q = query(collection(db, "users"), where("code", "==", code));
                 const querySnapshot = await getDocs(q);
 
                 if (querySnapshot.empty) {
                     errorMsg.textContent = "Invalid code. Please try again.";
                 } else {
-                    // Assuming code is unique, we take the first match
                     const userDoc = querySnapshot.docs[0];
-                    const userData = userDoc.data();
-                    
                     matchedUserDocId = userDoc.id;
+                    currentActiveCode = code;
                     
-                    loginSection.style.display = 'none';
-                    successPage.style.display = 'block';
-                    document.body.style.backgroundColor = '#e0f7fa'; // Cyan 50
-                    userDisplayName.textContent = userData.displayName || "Unknown User";
-                    errorMsg.textContent = "";
+                    setupRealtimeListener(matchedUserDocId);
                 }
             } catch (e) {
                 console.error("Error querying code", e);
                 errorMsg.textContent = "An error occurred. Check console.";
             }
         });
+
+        function setupRealtimeListener(uid) {
+            unsubscribeUserDoc = onSnapshot(doc(db, "users", uid), (docSnap) => {
+                if (docSnap.exists()) {
+                    const userData = docSnap.data();
+                    
+                    // Verify code is still valid and matches what we logged in with
+                    if (userData.code !== currentActiveCode) {
+                        alert("Session ended: Code invalidated or changed.");
+                        resetUI();
+                        errorMsg.textContent = "Session expired.";
+                    } else {
+                        // Success state update
+                        loginSection.style.display = 'none';
+                        successPage.style.display = 'block';
+                        document.body.style.backgroundColor = '#e0f7fa'; // Cyan 50
+                        userDisplayName.textContent = userData.displayName || "Unknown User";
+                        errorMsg.textContent = "";
+                    }
+                } else {
+                    // Document deleted
+                    alert("Session ended: User data not found.");
+                    resetUI();
+                }
+            }, (error) => {
+                console.error("Snapshot error:", error);
+                resetUI();
+                errorMsg.textContent = "Connection lost.";
+            });
+        }
 
         unlinkBtn.addEventListener('click', async () => {
             if (!matchedUserDocId) return;
@@ -114,8 +157,7 @@
                 await updateDoc(doc(db, "users", matchedUserDocId), {
                     code: null
                 });
-                alert("Unlinked successfully. Returning to start.");
-                location.reload();
+                // The snapshot listener will catch this change and reset the UI
             } catch (e) {
                 console.error("Error unlinking", e);
                 alert("Failed to unlink.");
